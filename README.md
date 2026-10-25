@@ -42,6 +42,7 @@ You also need ProjectDiscovery `httpx` on `PATH`, or pass `--httpx <path>`. The 
 ## Usage
 
 ```bash
+raijin-probe --scope scope.txt                                # probe every host the scope names
 raijin-probe --scope scope.txt -l hosts.txt
 raijin-probe --scope scope.txt -u app.example.com -u api.example.com
 raijin-probe --scope scope.txt --input httpx-results.jsonl    # reduce output you already have
@@ -58,6 +59,8 @@ example.com
 10.0.0.0/24
 !admin.example.com
 ```
+
+With no `-u`, `-l` or `--input`, raijin-probe probes what the scope names: every domain, every IP, and every address of ranges up to a /24, minus exclusions. A wildcard names no host and a larger range is too big to sweep blindly, so for each one `next` gives the command that enumerates it first (`raijin-subs` or `raijin-ports`).
 
 Targets outside the scope are dropped before httpx runs, and results for out-of-scope URLs are dropped from the output. Both are counted in `omitted.out_of_scope`.
 
@@ -171,7 +174,7 @@ The Raijin banner is **off by default**, so normal runs stay small. `--banner` p
 | Flag | Default | |
 |---|---|---|
 | `--scope` | (required) | scope file |
-| `-u` / `-l` / `--input` | | one target (repeatable) / target file / existing httpx JSONL |
+| `-u` / `-l` / `--input` | every host the scope names | one target (repeatable) / target file / existing httpx JSONL |
 | `--rate`, `--timeout`, `--threads` | | httpx `-rl` / `-timeout` / `-t` |
 | `--follow` | false | follow redirects on the same host (httpx `-fhr`) |
 | `--max-items` | 0 | max findings (0 keeps all) |
