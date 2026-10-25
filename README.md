@@ -37,7 +37,13 @@ Against httpx's text output (with `-sc -cl -ct -location -title -server -td`), r
 go install github.com/protonnegativo/raijin-probe/cmd/raijin-probe@latest
 ```
 
+This installs the latest release.
+
 You also need ProjectDiscovery `httpx` on `PATH`, or pass `--httpx <path>`. The Python `httpx` CLI is a different tool and will not work.
+
+### Versions
+
+Releases are tagged automatically on every change and every passing engine update. `raijin-probe --version` shows the release and the tested engine versions, e.g. `raijin-probe v0.1.3 (tested with httpx 1.12.0)`. `raijin-mcp update` updates every Raijin tool at once.
 
 ## Usage
 
@@ -188,7 +194,7 @@ The Raijin banner is **off by default**, so normal runs stay small. `--banner` p
 
 ## Engine versions
 
-raijin-probe is tested with the httpx version in [engines.json](engines.json), which is built into the binary. Before a run it checks `httpx -version`: another major version, or an older one, adds an `engine_version` error with the command to install the tested version. If httpx's output does not have the fields raijin-probe reads (`url` and `status_code` or `failed`), it adds an `engine_format` error. Neither changes the exit code. A weekly job tests the latest httpx against the benchmark lab and opens a PR to bump engines.json when it passes, or an issue when it breaks.
+raijin-probe is tested with the httpx version in [engines.json](engines.json), which is built into the binary. Before a run it checks `httpx -version`: another major version, or an older one, adds an `engine_version` error with the command to install the tested version. If httpx's output does not have the fields raijin-probe reads (`url` and `status_code` or `failed`), it adds an `engine_format` error. Neither changes the exit code. A weekly job tests the latest httpx against the benchmark lab and commits the bump and tags a release when it passes, or an issue when it breaks.
 
 ## Development
 

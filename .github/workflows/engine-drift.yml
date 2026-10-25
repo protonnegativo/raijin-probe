@@ -1,7 +1,7 @@
 name: engine drift
 
-# Weekly: install the latest httpx, run the LIVE benchmark against the local lab, and open a PR that bumps
-# engines.json when it passes, or an issue when it breaks.
+# Weekly: install the latest httpx, run the LIVE benchmark against the local lab, and when it passes with a
+# newer httpx, commit the engines.json bump to the default branch and tag a release; when it breaks, open an issue.
 on:
   schedule:
     - cron: "0 6 * * 1"
@@ -14,7 +14,6 @@ on:
 permissions:
   contents: write
   issues: write
-  pull-requests: write
 
 jobs:
   drift:
@@ -25,6 +24,8 @@ jobs:
       WANT: ${{ inputs.httpx || 'latest' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -66,6 +67,43 @@ jobs:
           name: live-bench
           path: ${{ runner.temp }}/live
           retention-days: 14
+      - name: Commit the bump and release
+        if: success()
+        env:
+          INSTALLED: ${{ steps.versions.outputs.installed }}
+          TESTED: ${{ steps.versions.outputs.tested }}
+        run: |
+          newer=$(python3 -c 'import sys; t=lambda s: tuple(map(int, s.split("."))); print(int(t(sys.argv[1]) > t(sys.argv[2])))' "$INSTALLED" "$TESTED")
+          [ "$newer" = 1 ] || { echo "httpx $INSTALLED is not newer than the tested $TESTED"; exit 0; }
+          python3 - "$INSTALLED" <<'PY'
+          import json, sys
+          p = "engines.json"
+          m = json.load(open(p))
+          m["httpx"]["version"] = sys.argv[1]
+          lines = ",\n".join("  " + json.dumps(k) + ": " + json.dumps(v) for k, v in m.items())
+          open(p, "w").write("{\n" + lines + "\n}\n")
+          PY
+          # the refreshed fixtures stay out of the commit: BENCHMARK.md numbers come from the committed ones
+          git checkout -- bench/fixtures
+          if ! go test ./... > "$RUNNER_TEMP/test.log" 2>&1; then
+            { echo "go test ./... fails with engines.json at httpx $INSTALLED:"; tail -40 "$RUNNER_TEMP/test.log"; } >> "$RUNNER_TEMP/verify.txt"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Test with httpx $INSTALLED"
+          git push origin "HEAD:${{ github.event.repository.default_branch }}"
+          # a push made with GITHUB_TOKEN does not trigger release.yml, so tag here
+          .github/release.sh patch
+      - name: Close the drift issue
+        if: success()
+        env:
+          INSTALLED: ${{ steps.versions.outputs.installed }}
+        run: |
+          for n in $(gh issue list --label engine-drift --state open --json number --jq '.[].number'); do
+            gh issue close "$n" --comment "Passes with httpx $INSTALLED: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          done
+      # last, so it also reports a go test failure in the bump step
       - name: Open or update the drift issue
         if: failure()
         env:
@@ -86,42 +124,4 @@ jobs:
             gh issue comment "$n" --body-file "$RUNNER_TEMP/issue.md"
           else
             gh issue create --title "Engine drift: httpx ${INSTALLED:-unknown}" --label engine-drift --body-file "$RUNNER_TEMP/issue.md"
-          fi
-      - name: Open or update the bump PR
-        if: success()
-        env:
-          INSTALLED: ${{ steps.versions.outputs.installed }}
-          TESTED: ${{ steps.versions.outputs.tested }}
-        run: |
-          newer=$(python3 -c 'import sys; t=lambda s: tuple(map(int, s.split("."))); print(int(t(sys.argv[1]) > t(sys.argv[2])))' "$INSTALLED" "$TESTED")
-          [ "$newer" = 1 ] || { echo "httpx $INSTALLED is not newer than the tested $TESTED"; exit 0; }
-          branch=engine-bump/httpx-$INSTALLED
-          python3 - "$INSTALLED" <<'PY'
-          import json, sys
-          p = "engines.json"
-          m = json.load(open(p))
-          m["httpx"]["version"] = sys.argv[1]
-          lines = ",\n".join("  " + json.dumps(k) + ": " + json.dumps(v) for k, v in m.items())
-          open(p, "w").write("{\n" + lines + "\n}\n")
-          PY
-          # the refreshed fixtures stay out of the PR: BENCHMARK.md numbers come from the committed ones
-          git checkout -- bench/fixtures
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -B "$branch"
-          git commit -am "Test with httpx $INSTALLED"
-          git push -f origin "$branch"
-          {
-            echo "httpx $TESTED -> $INSTALLED"
-            echo
-            echo '```'
-            cat "$RUNNER_TEMP/verify.txt"
-            echo '```'
-            echo
-            echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID (LIVE workdir in the live-bench artifact)"
-          } > "$RUNNER_TEMP/pr.md"
-          if [ -n "$(gh pr list --head "$branch" --state open --json number --jq '.[0].number')" ]; then
-            gh pr edit "$branch" --title "Test with httpx $INSTALLED" --body-file "$RUNNER_TEMP/pr.md"
-          else
-            gh pr create --head "$branch" --title "Test with httpx $INSTALLED" --body-file "$RUNNER_TEMP/pr.md"
           fi
