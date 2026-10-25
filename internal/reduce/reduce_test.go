@@ -18,7 +18,7 @@ func load(t *testing.T) []httpx.Event {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	events, err := httpx.Parse(f)
+	events, _, err := httpx.Parse(f)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +257,7 @@ func TestParseKeepsOddValues(t *testing.T) {
 {"input":"http://b","failed":true,"error":"timeout"}
 {"timestamp":"x"}
 not json`
-	events, err := httpx.Parse(strings.NewReader(lines))
+	events, _, err := httpx.Parse(strings.NewReader(lines))
 	if err != nil || len(events) != 2 {
 		t.Fatalf("parsed %d events (%v), want 2", len(events), err)
 	}

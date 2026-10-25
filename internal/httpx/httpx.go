@@ -11,7 +11,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
+	"time"
 )
 
 // ErrNotFound is returned when the httpx binary is not on PATH.
@@ -64,25 +66,41 @@ type Options struct {
 	RawPath string
 }
 
-// Run probes the targets and returns every event, plus the last stderr lines if httpx failed.
-func Run(ctx context.Context, targets []string, opt Options) ([]Event, string, error) {
+// Version runs httpx -version and returns what it printed, or "" if it did not answer within 3 seconds.
+// httpx writes its banner and "Current Version: vX.Y.Z" to stderr.
+func Version(ctx context.Context, bin string) string {
+	if bin == "" {
+		bin = "httpx"
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	out, _ := exec.CommandContext(ctx, bin, "-version", "-duc").CombinedOutput()
+	if ctx.Err() != nil {
+		return ""
+	}
+	return string(out)
+}
+
+// Run probes the targets and returns every event, the number of output lines that were not httpx
+// results, and the last stderr lines if httpx failed.
+func Run(ctx context.Context, targets []string, opt Options) ([]Event, int, string, error) {
 	bin := opt.Binary
 	if bin == "" {
 		bin = "httpx"
 	}
 	path, err := exec.LookPath(bin)
 	if err != nil {
-		return nil, "", ErrNotFound
+		return nil, 0, "", ErrNotFound
 	}
 
 	list, err := os.CreateTemp("", "raijin-probe-targets-*.txt")
 	if err != nil {
-		return nil, "", err
+		return nil, 0, "", err
 	}
 	defer os.Remove(list.Name())
 	if _, err := io.WriteString(list, strings.Join(targets, "\n")+"\n"); err != nil {
 		list.Close()
-		return nil, "", err
+		return nil, 0, "", err
 	}
 	list.Close()
 
@@ -91,29 +109,29 @@ func Run(ctx context.Context, targets []string, opt Options) ([]Event, string, e
 	cmd.Stderr = &stderr
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, "", err
+		return nil, 0, "", err
 	}
 	var r io.Reader = stdout
 	if opt.RawPath != "" {
 		raw, err := os.Create(opt.RawPath)
 		if err != nil {
-			return nil, "", err
+			return nil, 0, "", err
 		}
 		defer raw.Close()
 		r = io.TeeReader(stdout, raw)
 	}
 	if err := cmd.Start(); err != nil {
-		return nil, "", err
+		return nil, 0, "", err
 	}
-	events, parseErr := Parse(r)
+	events, unparsed, parseErr := Parse(r)
 	waitErr := cmd.Wait()
 	if parseErr != nil {
-		return events, tail(stderr.String(), 3), parseErr
+		return events, unparsed, tail(stderr.String(), 3), parseErr
 	}
 	if waitErr != nil {
-		return events, tail(stderr.String(), 3), fmt.Errorf("httpx exited: %w", waitErr)
+		return events, unparsed, tail(stderr.String(), 3), fmt.Errorf("httpx exited: %w", waitErr)
 	}
-	return events, "", nil
+	return events, unparsed, "", nil
 }
 
 // Args builds the httpx command line. -probe reports targets that did not answer, and -hash mmh3 gives
@@ -135,30 +153,56 @@ func Args(listFile string, opt Options) []string {
 	return append(args, opt.Extra...)
 }
 
-// Parse reads httpx JSONL. Lines that are not JSON objects with a URL are skipped.
-func Parse(r io.Reader) ([]Event, error) {
+// Parse reads httpx JSONL. httpx log lines ("[INF] ...", written when -silent is off) are skipped; other
+// lines that are not JSON objects with a URL are skipped and counted.
+func Parse(r io.Reader) ([]Event, int, error) {
 	var events []Event
+	unparsed := 0
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	for sc.Scan() {
 		line := bytes.TrimSpace(sc.Bytes())
-		if len(line) == 0 || line[0] != '{' {
+		if len(line) == 0 || logLine.Match(line) {
 			continue
 		}
 		var ev Event
-		if err := json.Unmarshal(line, &ev); err != nil {
+		if line[0] != '{' || json.Unmarshal(line, &ev) != nil {
+			unparsed++
 			continue
 		}
 		if ev.URL == "" {
 			ev.URL = ev.Input
 		}
 		if ev.URL == "" {
+			unparsed++
 			continue
 		}
 		events = append(events, ev)
 	}
-	return events, sc.Err()
+	return events, unparsed, sc.Err()
 }
+
+// FormatHint says when httpx's output does not look like what the reducer reads: every result needs a
+// url and either status_code or failed. unparsed counts the lines that were not results at all. It
+// returns "" when the output looks right.
+func FormatHint(events []Event, unparsed int, raw string) string {
+	bad := unparsed
+	for _, ev := range events {
+		if ev.StatusCode == 0 && !ev.Failed {
+			bad++
+		}
+	}
+	if bad == 0 {
+		return ""
+	}
+	hint := fmt.Sprintf("%d of %d httpx results had no url and status_code or failed; the engine's output format may have changed", bad, len(events)+unparsed)
+	if raw != "" {
+		hint += ". Read " + raw + " for the full output"
+	}
+	return hint
+}
+
+var logLine = regexp.MustCompile(`^\[(INF|WRN|ERR|FTL|DBG|VER)\] `)
 
 func tail(s string, n int) string {
 	lines := strings.Split(strings.TrimSpace(s), "\n")

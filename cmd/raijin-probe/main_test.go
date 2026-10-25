@@ -141,3 +141,27 @@ func TestScopeAloneProbesWhatTheScopeNames(t *testing.T) {
 		t.Errorf("next = %v", res.Next)
 	}
 }
+
+func TestEngineFormat(t *testing.T) {
+	var out, errb bytes.Buffer
+	if code := run([]string{"--scope", scopeFile(t), "--input", "../../testdata/sample.jsonl"}, &out, &errb); code != 0 {
+		t.Fatalf("exit %d: %s", code, errb.String())
+	}
+	if strings.Contains(out.String(), "engine_format") {
+		t.Errorf("sample output got an engine_format error: %s", out.String())
+	}
+	// testdata/renamed.jsonl is sample.jsonl with status_code renamed to status
+	out.Reset()
+	if code := run([]string{"--scope", scopeFile(t), "--input", "../../testdata/renamed.jsonl"}, &out, &errb); code != 0 {
+		t.Fatalf("exit %d: %s", code, errb.String())
+	}
+	var v struct {
+		Errors []struct{ Kind, Hint string }
+	}
+	if err := json.Unmarshal(out.Bytes(), &v); err != nil {
+		t.Fatal(err)
+	}
+	if len(v.Errors) != 1 || v.Errors[0].Kind != "engine_format" || !strings.Contains(v.Errors[0].Hint, "renamed.jsonl") {
+		t.Errorf("got errors %+v", v.Errors)
+	}
+}

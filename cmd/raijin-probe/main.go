@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"strings"
 
+	engines "github.com/protonnegativo/raijin-probe"
 	"github.com/protonnegativo/raijin-probe/internal/banner"
 	"github.com/protonnegativo/raijin-probe/internal/httpx"
 	"github.com/protonnegativo/raijin-probe/internal/reduce"
@@ -89,13 +90,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	var events []httpx.Event
+	unparsed := 0
 	if *input != "" {
 		f, err := os.Open(*input)
 		if err != nil {
 			fmt.Fprintln(stderr, "raijin-probe:", err)
 			return 1
 		}
-		events, err = httpx.Parse(f)
+		events, unparsed, err = httpx.Parse(f)
 		f.Close()
 		if err != nil {
 			fmt.Fprintln(stderr, "raijin-probe:", err)
@@ -150,8 +152,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer stop()
+		if e := versionError(ctx, *bin); e != nil {
+			res.Errors = append(res.Errors, *e)
+		}
 		var stderrTail string
-		events, stderrTail, err = httpx.Run(ctx, inScope, httpx.Options{
+		events, unparsed, stderrTail, err = httpx.Run(ctx, inScope, httpx.Options{
 			Binary: *bin, Rate: *rate, Timeout: *timeout, Threads: *threads, Follow: *follow,
 			Extra: fs.Args(), RawPath: *rawPath,
 		})
@@ -172,6 +177,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 			}
 			res.Errors = append(res.Errors, schema.Error{Kind: "engine_error", Hint: hint})
 		}
+	}
+
+	if hint := httpx.FormatHint(events, unparsed, res.Raw+*input); hint != "" {
+		res.Errors = append(res.Errors, schema.Error{Kind: "engine_format", Hint: hint})
+	}
+	if unparsed > 0 {
+		res.Omitted["unparsed"] += unparsed
 	}
 
 	opt := reduce.Defaults()
@@ -212,6 +224,31 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	write(stdout, &res, *format, *pretty)
 	return 0
+}
+
+// versionError warns when the installed httpx is not the version raijin-probe was tested with: another
+// major version, or an older one. Newer versions of the same major, and output it cannot read, are silent.
+func versionError(ctx context.Context, bin string) *schema.Error {
+	tested, err := engines.Tested()
+	if err != nil {
+		return nil
+	}
+	e, ok := tested["httpx"]
+	if !ok {
+		return nil
+	}
+	want, ok := engines.Parse(e.Version)
+	if !ok {
+		return nil
+	}
+	out := httpx.Version(ctx, bin)
+	got, ok := engines.Parse(out)
+	if !ok || !engines.Untested(got, want) {
+		return nil
+	}
+	installed := fmt.Sprintf("%d.%d.%d", got[0], got[1], got[2])
+	return &schema.Error{Kind: "engine_version", Hint: "httpx " + installed + " is not the tested " + e.Version +
+		"; results may be incomplete. Install the tested version: " + e.Install(e.Version)}
 }
 
 // useColor is true when w is a terminal and NO_COLOR is not set.

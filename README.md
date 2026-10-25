@@ -186,6 +186,10 @@ The Raijin banner is **off by default**, so normal runs stay small. `--banner` p
 | `--httpx` | httpx | path to the binary |
 | `--banner` | false | print the banner to stderr |
 
+## Engine versions
+
+raijin-probe is tested with the httpx version in [engines.json](engines.json), which is built into the binary. Before a run it checks `httpx -version`: another major version, or an older one, adds an `engine_version` error with the command to install the tested version. If httpx's output does not have the fields raijin-probe reads (`url` and `status_code` or `failed`), it adds an `engine_format` error. Neither changes the exit code. A weekly job tests the latest httpx against the benchmark lab and opens a PR to bump engines.json when it passes, or an issue when it breaks.
+
 ## Development
 
 ```bash
