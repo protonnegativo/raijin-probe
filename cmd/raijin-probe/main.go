@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 
 	engines "github.com/protonnegativo/raijin-probe"
@@ -22,7 +23,48 @@ import (
 	"github.com/protonnegativo/raijin-probe/internal/state"
 )
 
-const version = "0.1.0"
+// version is the release this binary was installed from, or "dev-<revision>" for a local build.
+var version = buildVersion(debug.ReadBuildInfo())
+
+// buildVersion is the module version when the binary was installed with go install ...@vX.Y.Z or @latest.
+// A local go build carries VCS settings instead (and since Go 1.24 a pseudo-version made from them), so
+// it reports "dev", the first 12 characters of the revision, and "+dirty" for uncommitted changes.
+func buildVersion(bi *debug.BuildInfo, ok bool) string {
+	if !ok || bi == nil {
+		return "dev"
+	}
+	rev, dirty := "", false
+	for _, s := range bi.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+		case "vcs.modified":
+			dirty = s.Value == "true"
+		}
+	}
+	if rev == "" && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		return bi.Main.Version
+	}
+	v := "dev"
+	if rev != "" {
+		v += "-" + rev[:min(12, len(rev))]
+	}
+	if dirty {
+		v += "+dirty"
+	}
+	return v
+}
+
+// versionLine is what --version prints: the release and the engine versions it is tested with.
+func versionLine() string {
+	line := "raijin-probe " + version
+	if tested, err := engines.Tested(); err == nil {
+		if e, ok := tested["httpx"]; ok {
+			line += " (tested with httpx " + e.Version + ")"
+		}
+	}
+	return line
+}
 
 type multi []string
 
@@ -62,10 +104,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if *showBanner {
-		banner.Write(stderr, "raijin-probe", version, useColor(stderr))
+		banner.Write(stderr, "raijin-probe", strings.TrimPrefix(version, "v"), useColor(stderr))
 	}
 	if *showVersion {
-		fmt.Fprintln(stdout, "raijin-probe", version)
+		fmt.Fprintln(stdout, versionLine())
 		return 0
 	}
 	if *scopeFile == "" {
@@ -162,7 +204,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		})
 		switch {
 		case errors.Is(err, httpx.ErrNotFound):
-			res.Errors = append(res.Errors, schema.Error{Kind: "missing_engine", Hint: "install httpx (go install github.com/projectdiscovery/httpx/cmd/httpx@latest) or pass --httpx <path>"})
+			res.Errors = append(res.Errors, schema.Error{Kind: "missing_engine", Hint: "install httpx (go install github.com/projectdiscovery/httpx/cmd/httpx@latest) or pass --httpx <path>, or run raijin-mcp update"})
 			res.Summary = "httpx not found, nothing probed"
 			res.Raw = ""
 			write(stdout, &res, *format, *pretty)
@@ -248,7 +290,8 @@ func versionError(ctx context.Context, bin string) *schema.Error {
 	}
 	installed := fmt.Sprintf("%d.%d.%d", got[0], got[1], got[2])
 	return &schema.Error{Kind: "engine_version", Hint: "httpx " + installed + " is not the tested " + e.Version +
-		"; results may be incomplete. Install the tested version: " + e.Install(e.Version)}
+		"; results may be incomplete. Install the tested version: " + e.Install(e.Version) +
+		", or run raijin-mcp update"}
 }
 
 // useColor is true when w is a terminal and NO_COLOR is not set.

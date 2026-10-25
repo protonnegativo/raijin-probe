@@ -3,10 +3,14 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"testing"
+
+	engines "github.com/protonnegativo/raijin-probe"
 )
 
 func scopeFile(t *testing.T) string {
@@ -39,7 +43,7 @@ func TestBannerGoesToStderrOnly(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d", code)
 	}
-	if !strings.Contains(errb.String(), "TGT-LOCK") || !strings.Contains(errb.String(), "raijin-probe v"+version) {
+	if !strings.Contains(errb.String(), "TGT-LOCK") || !strings.Contains(errb.String(), "raijin-probe v"+strings.TrimPrefix(version, "v")) {
 		t.Errorf("banner missing or without the version: %q", errb.String())
 	}
 	if strings.Contains(out.String(), "TGT-LOCK") {
@@ -163,5 +167,95 @@ func TestEngineFormat(t *testing.T) {
 	}
 	if len(v.Errors) != 1 || v.Errors[0].Kind != "engine_format" || !strings.Contains(v.Errors[0].Hint, "renamed.jsonl") {
 		t.Errorf("got errors %+v", v.Errors)
+	}
+}
+
+func TestBuildVersion(t *testing.T) {
+	rev := []debug.BuildSetting{{Key: "vcs.revision", Value: "0123456789abcdef0123"}}
+	cases := []struct {
+		name string
+		bi   *debug.BuildInfo
+		ok   bool
+		want string
+	}{
+		{"installed release", &debug.BuildInfo{Main: debug.Module{Version: "v0.1.3"}}, true, "v0.1.3"},
+		{"no build info", nil, false, "dev"},
+		{"devel without vcs", &debug.BuildInfo{Main: debug.Module{Version: "(devel)"}}, true, "dev"},
+		{"local build", &debug.BuildInfo{Main: debug.Module{Version: "v0.0.0-20261025000000-0123456789ab"}, Settings: rev}, true, "dev-0123456789ab"},
+		{"local dirty build", &debug.BuildInfo{Main: debug.Module{Version: "(devel)"}, Settings: append(rev, debug.BuildSetting{Key: "vcs.modified", Value: "true"})}, true, "dev-0123456789ab+dirty"},
+	}
+	for _, c := range cases {
+		if got := buildVersion(c.bi, c.ok); got != c.want {
+			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+func testedHTTPX(t *testing.T) engines.Engine {
+	t.Helper()
+	tested, err := engines.Tested()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tested["httpx"]
+}
+
+func TestVersionLine(t *testing.T) {
+	var out, errb bytes.Buffer
+	if code := run([]string{"--version"}, &out, &errb); code != 0 {
+		t.Fatalf("exit %d: %s", code, errb.String())
+	}
+	want := "raijin-probe " + version + " (tested with httpx " + testedHTTPX(t).Version + ")\n"
+	if out.String() != want {
+		t.Errorf("got %q, want %q", out.String(), want)
+	}
+}
+
+// fakeHTTPX is an httpx that prints v for -version and nothing for a probe.
+func fakeHTTPX(t *testing.T, v string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "httpx")
+	script := "#!/bin/sh\n[ \"$1\" = -version ] && echo \"[INF] Current httpx version v" + v + " (latest)\" >&2\nexit 0\n"
+	if err := os.WriteFile(p, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestEngineVersion(t *testing.T) {
+	e := testedHTTPX(t)
+	want, ok := engines.Parse(e.Version)
+	if !ok {
+		t.Fatalf("tested version %q does not parse", e.Version)
+	}
+	for _, c := range []struct {
+		installed string
+		warn      bool
+	}{
+		{e.Version, false},
+		{fmt.Sprintf("%d.0.0", want[0]+1), true},
+	} {
+		var out, errb bytes.Buffer
+		if code := run([]string{"--scope", scopeFile(t), "-u", "a.example.com", "--httpx", fakeHTTPX(t, c.installed), "--raw", filepath.Join(t.TempDir(), "raw.jsonl")}, &out, &errb); code != 0 {
+			t.Fatalf("exit %d: %s", code, errb.String())
+		}
+		var v struct {
+			Errors []struct{ Kind, Hint string }
+		}
+		if err := json.Unmarshal(out.Bytes(), &v); err != nil {
+			t.Fatal(err)
+		}
+		warned := false
+		for _, x := range v.Errors {
+			if x.Kind == "engine_version" {
+				warned = true
+				if !strings.HasSuffix(x.Hint, ", or run raijin-mcp update") {
+					t.Errorf("hint %q does not point to the updater", x.Hint)
+				}
+			}
+		}
+		if warned != c.warn {
+			t.Errorf("httpx %s: engine_version warning = %v, want %v (%+v)", c.installed, warned, c.warn, v.Errors)
+		}
 	}
 }
