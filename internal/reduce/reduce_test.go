@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/protonnegativo/raijin-core/scope"
 	"github.com/protonnegativo/raijin-probe/internal/httpx"
 	"github.com/protonnegativo/raijin-probe/internal/schema"
-	"github.com/protonnegativo/raijin-probe/internal/scope"
 )
 
 func load(t *testing.T) []httpx.Event {

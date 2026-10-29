@@ -21,11 +21,11 @@ Reproduce: `bench/run.sh` (set `HTTPX=<path>` if ProjectDiscovery httpx is not f
 
 | Output | Bytes | Tokens | vs. httpx -json |
 |---|---:|---:|---:|
-| httpx `-json` | 26,531 | 9,783 | 1× |
-| httpx `-json` with raijin-probe's flags | 30,066 | 11,088 | 0.9× |
+| httpx `-json` | 26,528 | 9,783 | 1× |
+| httpx `-json` with raijin-probe's flags | 30,069 | 11,087 | 0.9× |
 | httpx text (stdout+stderr) | 7,336 | 3,153 | 3.1× |
-| **raijin-probe JSON (default)** | 2,530 | **1,109** | **8.8×** |
-| raijin-probe `--pretty` | 3,633 | 1,413 | 6.9× |
+| **raijin-probe JSON (default)** | 2,536 | **1,104** | **8.9×** |
+| raijin-probe `--pretty` | 3,638 | 1,409 | 6.9× |
 | raijin-probe `--format table` | 430 | 148 | 66× |
 
 ## Scenario 2: interesting
@@ -34,11 +34,11 @@ Reproduce: `bench/run.sh` (set `HTTPX=<path>` if ProjectDiscovery httpx is not f
 
 | Output | Bytes | Tokens | vs. httpx -json |
 |---|---:|---:|---:|
-| httpx `-json` | 6,585 | 2,411 | 1× |
-| httpx `-json` with raijin-probe's flags | 7,667 | 2,825 | 0.85× |
+| httpx `-json` | 6,570 | 2,411 | 1× |
+| httpx `-json` with raijin-probe's flags | 7,668 | 2,825 | 0.85× |
 | httpx text (stdout+stderr) | 1,949 | 823 | 2.9× |
-| **raijin-probe JSON (default)** | 2,876 | **1,022** | **2.4×** |
-| raijin-probe `--pretty` | 4,551 | 1,534 | 1.6× |
+| **raijin-probe JSON (default)** | 2,887 | **1,016** | **2.4×** |
+| raijin-probe `--pretty` | 4,562 | 1,530 | 1.6× |
 | raijin-probe `--format table` | 1,113 | 410 | 5.9× |
 
 In both scenarios the raijin-probe JSON includes about 17 tokens for `raw`, the path of httpx's saved JSONL.
@@ -54,10 +54,10 @@ What the JSON leaves out stays in httpx's JSONL, which raijin-probe saves to dis
 
 ## Reading the numbers
 
-- **Against `httpx -json`**, the structured output an agent would parse, raijin-probe uses **8.8× fewer tokens** on the noisy run and **2.4× fewer** on the interesting run for the same URLs and fields. The gap grows with repetition: 40 identical nginx pages cost one set of fields plus 40 URLs.
+- **Against `httpx -json`**, the structured output an agent would parse, raijin-probe uses **8.9× fewer tokens** on the noisy run and **2.4× fewer** on the interesting run for the same URLs and fields. The gap grows with repetition: 40 identical nginx pages cost one set of fields plus 40 URLs.
 - **Against httpx's text output**, the result depends on the run:
-  - noisy: **2.8× smaller** (3,153 → 1,109);
-  - interesting: **24% larger** (823 → 1,022).
+  - noisy: **2.9× smaller** (3,153 → 1,104);
+  - interesting: **23% larger** (823 → 1,016).
 
   When every response is different there is nothing to collapse, and raijin-probe's JSON keys, IDs, tags and severities cost more than the text's brackets. In exchange the agent gets the dead port's error, field names it does not have to guess from position, and the panels and 403s ranked first.
 - **The output stays bounded.** On a probe too big for `--max-bytes`, raijin-probe cuts the least important data first: group locations, then groups, then extra locations of low-ranked findings, then low-ranked findings. Every cut is counted in `omitted`, and `next` points to the raw file. Raw httpx output has no upper bound.
@@ -69,6 +69,6 @@ o200k tokens:
 | Version | Scenario 1 | Scenario 2 | Lossless? |
 |---|---:|---:|---|
 | `type` written on every entry | 1,167 | 1,110 | yes |
-| **`type` left out when `text/html`** (current) | **1,109** | **1,022** | **yes** |
+| **`type` left out when `text/html`** (current) | **1,104** | **1,016** | **yes** |
 
 Before the first benchmark run, two changes were made on a hand-run sample of the interesting lab: `->` in locations is no longer escaped as `\u003e`, and the outlier rule needs a baseline. The first outlier rule flagged every response seen once in a run of 10+ URLs, so the interesting run reported its nginx and Apache default pages as findings.

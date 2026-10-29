@@ -1,5 +1,11 @@
 # ⚡ Raijin Probe
 
+[![CI](https://github.com/protonnegativo/raijin-probe/actions/workflows/ci.yml/badge.svg)](https://github.com/protonnegativo/raijin-probe/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/protonnegativo/raijin-probe)](https://github.com/protonnegativo/raijin-probe/releases/latest)
+[![License: MIT](https://img.shields.io/github/license/protonnegativo/raijin-probe)](LICENSE)
+[![Go Reference](https://pkg.go.dev/badge/github.com/protonnegativo/raijin-probe.svg)](https://pkg.go.dev/github.com/protonnegativo/raijin-probe)
+[![Go Report Card](https://goreportcard.com/badge/github.com/protonnegativo/raijin-probe)](https://goreportcard.com/report/github.com/protonnegativo/raijin-probe)
+
 **httpx for AI agents: every URL with its status, title, tech and size, identical responses collapsed, the interesting hosts ranked first.**
 
 `raijin-probe` is a tool of **Raijin**, an arsenal of offensive security tools built for AI agents. It runs [httpx](https://github.com/projectdiscovery/httpx) underneath and returns the **Raijin Schema**: one compact JSON where URLs that returned the same response share one entry, login panels, directory listings, 401/403s, 5xx errors and outliers are ranked findings, and anything it had to cut is counted.
@@ -12,24 +18,24 @@ Here is the same probe, with the same URLs, read by an agent (tokens, `o200k_bas
 
 ```
 Noisy run: 56 URLs, 40 identical nginx pages, 1 Jenkins
-  raijin-probe    ██▎                      1,109 tokens
+  raijin-probe    ██▎                      1,104 tokens
   httpx text      ██████▌                  3,153 tokens
   httpx -json     ████████████████████     9,783 tokens
 
 Interesting run: 15 URLs, all different
-  raijin-probe    ████████▌                1,022 tokens
+  raijin-probe    ████████▌                1,016 tokens
   httpx text      ██████▉                    823 tokens
   httpx -json     ████████████████████     2,411 tokens
 ```
 
-raijin-probe reads **8.8×** fewer tokens than `httpx -json` on the noisy run and **2.4×** fewer on the interesting run. Each run's bars are drawn to scale against `httpx -json`.
+raijin-probe reads **8.9×** fewer tokens than `httpx -json` on the noisy run and **2.4×** fewer on the interesting run. Each run's bars are drawn to scale against `httpx -json`.
 
 - **Nothing is lost.** Every URL httpx probed is in the output, with its status, title, length, server, tech, content type, redirect target and IPs. `bench/verify.py` checked all 71 httpx results in both runs and none were missing.
 - **The real targets come first.** A login panel, a Jenkins dashboard, a directory listing and a 403 are findings, ranked by severity. 40 identical default pages are one group that lists all 40 URLs.
 - **Output is bounded.** On a huge probe, `--max-bytes` cuts the least important data first and counts every cut. httpx's output grows with every URL.
 - **Details are one file away.** httpx's full JSONL is saved to disk, and its path is in `raw`. It holds the timestamps, response times, word and line counts, hashes and everything else, and it costs no tokens until the agent opens it.
 
-Against httpx's text output (with `-sc -cl -ct -location -title -server -td`), raijin-probe is **2.8×** smaller on the noisy run and **24% larger** on the interesting run. When every response is different there is nothing to collapse, and the JSON keys, IDs, tags and severities cost more than the text's brackets. The text output also has no dedup, no ranking and no field names. Full method and numbers are in [BENCHMARK.md](BENCHMARK.md), and `bench/run.sh` reproduces them.
+Against httpx's text output (with `-sc -cl -ct -location -title -server -td`), raijin-probe is **2.9×** smaller on the noisy run and **23% larger** on the interesting run. When every response is different there is nothing to collapse, and the JSON keys, IDs, tags and severities cost more than the text's brackets. The text output also has no dedup, no ranking and no field names. Full method and numbers are in [BENCHMARK.md](BENCHMARK.md), and `bench/run.sh` reproduces them.
 
 ## Install
 
@@ -74,8 +80,9 @@ Targets outside the scope are dropped before httpx runs, and results for out-of-
 
 ```json
 {
+  "schema_version": 1,
   "tool": "raijin-probe",
-  "version": "0.1.0",
+  "version": "v0.1.0",
   "target": "56 target(s)",
   "summary": "56 URLs, 1 findings (1 medium), 5 groups, 1 no response",
   "findings": [
@@ -160,6 +167,9 @@ What the reducer does:
 
   Every cut is counted in `omitted`, `budget.truncated` is set, and `next` points to the raw file. `--max-items` caps the number of findings (0, the default, keeps all).
 - **Errors** say what to try next. If httpx is missing, the exit code is 2.
+- **`schema_version`** (currently 1) is the first field of every result and changes only when the schema breaks.
+- **An invalid scope file** runs nothing and returns one error per bad line, each with `kind: "scope"` and the line number in `hint` (for example `line 2: port in rule`).
+- **Exit codes:** 0 ok; 1 wrong usage, with no JSON (bad flag, missing `--scope`, no target in scope); 2 structured error, with the JSON result on stdout (invalid scope, a scope that names no single host, httpx missing). An agent tells them apart by `errors[].kind`.
 
 Fields an agent can rebuild are left out to save tokens:
 
@@ -171,7 +181,7 @@ Fields an agent can rebuild are left out to save tokens:
 - `omitted`, `errors` and `next` appear only when they are not empty.
 - `budget` appears only when something was cut.
 
-The JSON is compact (one line) by default because indentation costs 27% to 50% more tokens in the benchmark; `--pretty` indents it (the example above is pretty-printed). `--format table` prints a short human view of the same result; it lists finding URLs but only counts group URLs.
+The JSON is compact (one line) by default because indentation costs 28% to 51% more tokens in the benchmark; `--pretty` indents it (the example above is pretty-printed). `--format table` prints a short human view of the same result; it lists finding URLs but only counts group URLs.
 
 The Raijin banner is **off by default**, so normal runs stay small. `--banner` prints it to **stderr** (never stdout, so the JSON is untouched), with the version taken from the binary. Colors are disabled when `NO_COLOR` is set or stderr is not a terminal.
 
@@ -203,7 +213,7 @@ go test ./...
 go vet ./...
 ```
 
-Standard library only. httpx runs as a subprocess with `-json -silent -no-color -duc -probe -hash mmh3`, so the binary stays small and httpx can be updated on its own. `-probe` makes httpx report the targets that did not answer, and the body hash tells identical responses apart.
+The only dependency is [raijin-core](https://github.com/protonnegativo/raijin-core) (scope, state, result envelope); the rest is the standard library. httpx runs as a subprocess with `-json -silent -no-color -duc -probe -hash mmh3`, so the binary stays small and httpx can be updated on its own. `-probe` makes httpx report the targets that did not answer, and the body hash tells identical responses apart.
 
 ## Responsible use
 

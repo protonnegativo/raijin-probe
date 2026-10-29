@@ -4,7 +4,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -14,22 +13,31 @@ import (
 	"runtime/debug"
 	"strings"
 
+	core "github.com/protonnegativo/raijin-core/schema"
+	"github.com/protonnegativo/raijin-core/scope"
+	"github.com/protonnegativo/raijin-core/state"
 	engines "github.com/protonnegativo/raijin-probe"
 	"github.com/protonnegativo/raijin-probe/internal/banner"
 	"github.com/protonnegativo/raijin-probe/internal/httpx"
 	"github.com/protonnegativo/raijin-probe/internal/reduce"
 	"github.com/protonnegativo/raijin-probe/internal/schema"
-	"github.com/protonnegativo/raijin-probe/internal/scope"
-	"github.com/protonnegativo/raijin-probe/internal/state"
 )
 
-// version is the release this binary was installed from, or "dev-<revision>" for a local build.
+// releaseVersion is set by the release build (-ldflags "-X main.releaseVersion=vX.Y.Z"). It has to be a
+// plain string variable: the linker cannot set one that is initialized by a function call.
+var releaseVersion string
+
+// version is the release this binary was built as, installed from, or "dev-<revision>" for a local build.
 var version = buildVersion(debug.ReadBuildInfo())
 
-// buildVersion is the module version when the binary was installed with go install ...@vX.Y.Z or @latest.
-// A local go build carries VCS settings instead (and since Go 1.24 a pseudo-version made from them), so
-// it reports "dev", the first 12 characters of the revision, and "+dirty" for uncommitted changes.
+// buildVersion is releaseVersion when the release build set it, else the module version when the binary
+// was installed with go install ...@vX.Y.Z or @latest. A local go build carries VCS settings instead (and
+// since Go 1.24 a pseudo-version made from them), so it reports "dev", the first 12 characters of the
+// revision, and "+dirty" for uncommitted changes.
 func buildVersion(bi *debug.BuildInfo, ok bool) string {
+	if releaseVersion != "" {
+		return releaseVersion
+	}
 	if !ok || bi == nil {
 		return "dev"
 	}
@@ -97,6 +105,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	showVersion := fs.Bool("version", false, "print the version")
 	showBanner := fs.Bool("banner", false, "print the Raijin banner to stderr (off by default to keep output small)")
 	fs.Usage = func() {
+		fmt.Fprintf(stderr, "exit codes: 0 ok, 1 wrong usage, 2 structured error (JSON on stdout, see errors[].kind)\n\n")
 		fmt.Fprintf(stderr, "usage: raijin-probe --scope scope.txt [-u target | -l targets.txt | --input results.jsonl] [flags] [-- extra httpx args]\n\nWith no targets it probes every host the scope names.\n\n")
 		fs.PrintDefaults()
 	}
@@ -116,8 +125,19 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	sc, err := scope.Load(*scopeFile)
 	if err != nil {
-		fmt.Fprintln(stderr, "raijin-probe: scope:", err)
-		return 1
+		// An invalid scope is an error the caller can fix: report every bad line and run nothing.
+		res := schema.Result{
+			Tool:     "raijin-probe",
+			Version:  version,
+			Target:   *scopeFile,
+			Summary:  "invalid scope file, nothing probed",
+			Findings: []schema.Finding{},
+			Groups:   []schema.Group{},
+			Errors:   scope.SchemaErrors(err),
+			Budget:   schema.Budget{MaxItems: *maxItems, MaxBytes: *maxBytes},
+		}
+		write(stdout, &res, *format, *pretty)
+		return 2
 	}
 
 	res := schema.Result{
@@ -174,7 +194,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 				res.Summary = "the scope names no single host to scan"
 				res.Target = *scopeFile
 				write(stdout, &res, *format, *pretty)
-				return 1
+				return 2
 			}
 			fmt.Fprintln(stderr, "raijin-probe: no targets in scope")
 			return 1
@@ -244,7 +264,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		if err != nil {
 			res.Errors = append(res.Errors, schema.Error{Kind: "state_error", Hint: err.Error()})
 		} else {
-			newCount = st.Mark(res.Findings, allLocations)
+			newCount = state.Mark(st, res.Findings, allLocations,
+				func(f *schema.Finding) string { return f.Fingerprint },
+				func(f *schema.Finding) { f.New = true })
 			if err := st.Save(*statePath); err != nil {
 				res.Errors = append(res.Errors, schema.Error{Kind: "state_error", Hint: err.Error()})
 			}
@@ -389,12 +411,7 @@ func write(w io.Writer, res *schema.Result, format string, pretty bool) {
 		}
 		return
 	}
-	enc := json.NewEncoder(w)
-	enc.SetEscapeHTML(false)
-	if pretty {
-		enc.SetIndent("", "  ")
-	}
-	_ = enc.Encode(res)
+	_ = core.Write(w, res, pretty)
 }
 
 // describe is a one-line view of a response for the table: status, title, server.
