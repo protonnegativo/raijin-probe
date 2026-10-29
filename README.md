@@ -28,6 +28,8 @@ Interesting run: 15 URLs, all different
   httpx -json     ████████████████████     2,411 tokens
 ```
 
+On the interesting run, httpx's text output is smaller than raijin-probe's: 823 tokens against 1,016 (23% larger). When every response is different there is nothing to collapse, and raijin-probe's JSON keys, IDs, tags and severities cost more than the text's brackets. In exchange the agent gets the dead port's error, named fields instead of positions, and the login panel, directory listing and 403s ranked first. Text is the cheaper choice for a short scan of unrelated hosts; raijin-probe pays off as repetition grows, because httpx text costs a line per URL while identical responses become one group (3,153 tokens of text against 1,104 on the noisy run).
+
 raijin-probe reads **8.9×** fewer tokens than `httpx -json` on the noisy run and **2.4×** fewer on the interesting run. Each run's bars are drawn to scale against `httpx -json`.
 
 - **Nothing is lost.** Every URL httpx probed is in the output, with its status, title, length, server, tech, content type, redirect target and IPs. `bench/verify.py` checked all 71 httpx results in both runs and none were missing.
