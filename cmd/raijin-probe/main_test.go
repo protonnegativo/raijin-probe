@@ -354,3 +354,26 @@ func TestReleaseVersionWinsOverBuildInfo(t *testing.T) {
 		t.Errorf("got %q, want v9.9.9", got)
 	}
 }
+
+func TestWildcardOnlyScopeIsStructuredExit2(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "scope.txt")
+	if err := os.WriteFile(path, []byte("*.example.com\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if code := run([]string{"--scope", path}, &out, &errb); code != 2 {
+		t.Fatalf("exit %d, want 2: %s", code, out.String())
+	}
+	if !strings.HasPrefix(out.String(), `{"schema_version":1,`) {
+		t.Fatalf("stdout = %.60s", out.String())
+	}
+}
+
+func TestUsageErrorsExit1WithoutJSON(t *testing.T) {
+	for _, args := range [][]string{{"--input", "x"}, {"--nope"}} {
+		var out, errb bytes.Buffer
+		if code := run(args, &out, &errb); code != 1 || out.Len() != 0 {
+			t.Errorf("%v: exit %d, stdout %q; want 1 and empty", args, code, out.String())
+		}
+	}
+}

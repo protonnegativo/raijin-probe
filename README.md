@@ -169,7 +169,7 @@ What the reducer does:
 - **Errors** say what to try next. If httpx is missing, the exit code is 2.
 - **`schema_version`** (currently 1) is the first field of every result and changes only when the schema breaks.
 - **An invalid scope file** runs nothing and returns one error per bad line, each with `kind: "scope"` and the line number in `hint` (for example `line 2: port in rule`).
-- **Exit codes:** 0 ok; 1 wrong usage (bad flag, missing `--scope`, no target in scope); 2 structured error, with the JSON result on stdout (invalid scope, httpx missing). An agent tells them apart by `errors[].kind`.
+- **Exit codes:** 0 ok; 1 wrong usage, with no JSON (bad flag, missing `--scope`, no target in scope); 2 structured error, with the JSON result on stdout (invalid scope, a scope that names no single host, httpx missing). An agent tells them apart by `errors[].kind`.
 
 Fields an agent can rebuild are left out to save tokens:
 
