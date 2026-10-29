@@ -4,7 +4,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -14,13 +13,14 @@ import (
 	"runtime/debug"
 	"strings"
 
+	core "github.com/protonnegativo/raijin-core/schema"
+	"github.com/protonnegativo/raijin-core/scope"
+	"github.com/protonnegativo/raijin-core/state"
 	engines "github.com/protonnegativo/raijin-probe"
 	"github.com/protonnegativo/raijin-probe/internal/banner"
 	"github.com/protonnegativo/raijin-probe/internal/httpx"
 	"github.com/protonnegativo/raijin-probe/internal/reduce"
 	"github.com/protonnegativo/raijin-probe/internal/schema"
-	"github.com/protonnegativo/raijin-probe/internal/scope"
-	"github.com/protonnegativo/raijin-probe/internal/state"
 )
 
 // version is the release this binary was installed from, or "dev-<revision>" for a local build.
@@ -116,7 +116,18 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	sc, err := scope.Load(*scopeFile)
 	if err != nil {
-		fmt.Fprintln(stderr, "raijin-probe: scope:", err)
+		// An invalid scope is an error the caller can fix: report every bad line and run nothing.
+		res := schema.Result{
+			Tool:     "raijin-probe",
+			Version:  version,
+			Target:   *scopeFile,
+			Summary:  "invalid scope file, nothing probed",
+			Findings: []schema.Finding{},
+			Groups:   []schema.Group{},
+			Errors:   scope.SchemaErrors(err),
+			Budget:   schema.Budget{MaxItems: *maxItems, MaxBytes: *maxBytes},
+		}
+		write(stdout, &res, *format, *pretty)
 		return 1
 	}
 
@@ -244,7 +255,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		if err != nil {
 			res.Errors = append(res.Errors, schema.Error{Kind: "state_error", Hint: err.Error()})
 		} else {
-			newCount = st.Mark(res.Findings, allLocations)
+			newCount = state.Mark(st, res.Findings, allLocations,
+				func(f *schema.Finding) string { return f.Fingerprint },
+				func(f *schema.Finding) { f.New = true })
 			if err := st.Save(*statePath); err != nil {
 				res.Errors = append(res.Errors, schema.Error{Kind: "state_error", Hint: err.Error()})
 			}
@@ -389,12 +402,7 @@ func write(w io.Writer, res *schema.Result, format string, pretty bool) {
 		}
 		return
 	}
-	enc := json.NewEncoder(w)
-	enc.SetEscapeHTML(false)
-	if pretty {
-		enc.SetIndent("", "  ")
-	}
-	_ = enc.Encode(res)
+	_ = core.Write(w, res, pretty)
 }
 
 // describe is a one-line view of a response for the table: status, title, server.

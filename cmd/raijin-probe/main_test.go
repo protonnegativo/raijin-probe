@@ -259,3 +259,83 @@ func TestEngineVersion(t *testing.T) {
 		}
 	}
 }
+
+func TestOutputStartsWithSchemaVersion(t *testing.T) {
+	var out, errb bytes.Buffer
+	if code := run([]string{"--scope", scopeFile(t), "--input", "../../testdata/sample.jsonl"}, &out, &errb); code != 0 {
+		t.Fatalf("exit %d: %s", code, errb.String())
+	}
+	if !strings.HasPrefix(out.String(), `{"schema_version":1,"tool":"raijin-probe",`) {
+		t.Errorf("output must start with schema_version: %.80s", out.String())
+	}
+}
+
+func TestInvalidScopeIsStructuredAndRunsNothing(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "scope.txt")
+	body := "example.com\nexample.com:443\n10.0.0.7/24\n*.ok.example\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	// The engine path does not exist: if anything tried to run it, the result would hold missing_engine.
+	code := run([]string{"--scope", path, "-u", "example.com", "--httpx", "/nonexistent/httpx"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("exit 0 for an invalid scope: %s", out.String())
+	}
+	var v struct {
+		SchemaVersion int `json:"schema_version"`
+		Summary       string
+		Errors        []struct{ Kind, Hint string }
+	}
+	if err := json.Unmarshal(out.Bytes(), &v); err != nil {
+		t.Fatalf("stdout is not JSON: %v: %s", err, out.String())
+	}
+	if v.SchemaVersion != 1 || len(v.Errors) != 2 {
+		t.Fatalf("want schema_version 1 and one error per bad line (2), got %+v", v)
+	}
+	for i, want := range []string{"line 2: port in rule", "line 3: CIDR has host bits set"} {
+		if e := v.Errors[i]; e.Kind != "scope" || !strings.Contains(e.Hint, want) {
+			t.Errorf("error %d = %+v, want kind scope and %q", i, e, want)
+		}
+	}
+	if !strings.Contains(v.Summary, "nothing probed") {
+		t.Errorf("summary = %q", v.Summary)
+	}
+	if errb.Len() != 0 {
+		t.Errorf("stderr should be empty, got %q", errb.String())
+	}
+}
+
+func TestMissingScopeFileIsStructured(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := run([]string{"--scope", filepath.Join(t.TempDir(), "nope.txt"), "-u", "example.com"}, &out, &errb)
+	var v struct{ Errors []struct{ Kind, Hint string } }
+	if code == 0 || json.Unmarshal(out.Bytes(), &v) != nil || len(v.Errors) != 1 || v.Errors[0].Kind != "scope" {
+		t.Errorf("exit %d, stdout %s", code, out.String())
+	}
+}
+
+func TestStateMarksNewFindingsAcrossRuns(t *testing.T) {
+	state := filepath.Join(t.TempDir(), "probe.state.json")
+	newCount := func() string {
+		var out, errb bytes.Buffer
+		args := []string{"--scope", scopeFile(t), "--input", "../../testdata/sample.jsonl", "--state", state}
+		if code := run(args, &out, &errb); code != 0 {
+			t.Fatalf("exit %d: %s", code, errb.String())
+		}
+		var v struct {
+			Summary string
+			Errors  []struct{ Kind, Hint string }
+		}
+		if err := json.Unmarshal(out.Bytes(), &v); err != nil || len(v.Errors) != 0 {
+			t.Fatalf("stdout = %s", out.String())
+		}
+		return v.Summary
+	}
+	if s := newCount(); !strings.Contains(s, " new") || strings.HasSuffix(s, ", 0 new") {
+		t.Errorf("first run should report new findings: %q", s)
+	}
+	if s := newCount(); !strings.HasSuffix(s, ", 0 new") {
+		t.Errorf("second run should report 0 new: %q", s)
+	}
+}
