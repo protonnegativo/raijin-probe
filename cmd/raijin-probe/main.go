@@ -23,13 +23,21 @@ import (
 	"github.com/protonnegativo/raijin-probe/internal/schema"
 )
 
-// version is the release this binary was installed from, or "dev-<revision>" for a local build.
+// releaseVersion is set by the release build (-ldflags "-X main.releaseVersion=vX.Y.Z"). It has to be a
+// plain string variable: the linker cannot set one that is initialized by a function call.
+var releaseVersion string
+
+// version is the release this binary was built as, installed from, or "dev-<revision>" for a local build.
 var version = buildVersion(debug.ReadBuildInfo())
 
-// buildVersion is the module version when the binary was installed with go install ...@vX.Y.Z or @latest.
-// A local go build carries VCS settings instead (and since Go 1.24 a pseudo-version made from them), so
-// it reports "dev", the first 12 characters of the revision, and "+dirty" for uncommitted changes.
+// buildVersion is releaseVersion when the release build set it, else the module version when the binary
+// was installed with go install ...@vX.Y.Z or @latest. A local go build carries VCS settings instead (and
+// since Go 1.24 a pseudo-version made from them), so it reports "dev", the first 12 characters of the
+// revision, and "+dirty" for uncommitted changes.
 func buildVersion(bi *debug.BuildInfo, ok bool) string {
+	if releaseVersion != "" {
+		return releaseVersion
+	}
 	if !ok || bi == nil {
 		return "dev"
 	}
