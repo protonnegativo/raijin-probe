@@ -279,8 +279,11 @@ func TestInvalidScopeIsStructuredAndRunsNothing(t *testing.T) {
 	var out, errb bytes.Buffer
 	// The engine path does not exist: if anything tried to run it, the result would hold missing_engine.
 	code := run([]string{"--scope", path, "-u", "example.com", "--httpx", "/nonexistent/httpx"}, &out, &errb)
-	if code == 0 {
-		t.Fatalf("exit 0 for an invalid scope: %s", out.String())
+	if code != 2 {
+		t.Fatalf("exit %d for an invalid scope, want 2: %s", code, out.String())
+	}
+	if !strings.HasPrefix(out.String(), `{"schema_version":1,`) {
+		t.Fatalf("stdout does not start with the schema version: %.60s", out.String())
 	}
 	var v struct {
 		SchemaVersion int `json:"schema_version"`

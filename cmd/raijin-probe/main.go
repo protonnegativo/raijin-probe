@@ -105,6 +105,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	showVersion := fs.Bool("version", false, "print the version")
 	showBanner := fs.Bool("banner", false, "print the Raijin banner to stderr (off by default to keep output small)")
 	fs.Usage = func() {
+		fmt.Fprintf(stderr, "exit codes: 0 ok, 1 wrong usage, 2 structured error (JSON on stdout, see errors[].kind)\n\n")
 		fmt.Fprintf(stderr, "usage: raijin-probe --scope scope.txt [-u target | -l targets.txt | --input results.jsonl] [flags] [-- extra httpx args]\n\nWith no targets it probes every host the scope names.\n\n")
 		fs.PrintDefaults()
 	}
@@ -136,7 +137,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			Budget:   schema.Budget{MaxItems: *maxItems, MaxBytes: *maxBytes},
 		}
 		write(stdout, &res, *format, *pretty)
-		return 1
+		return 2
 	}
 
 	res := schema.Result{
