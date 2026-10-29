@@ -1,5 +1,11 @@
 # ⚡ Raijin Probe
 
+[![CI](https://github.com/protonnegativo/raijin-probe/actions/workflows/ci.yml/badge.svg)](https://github.com/protonnegativo/raijin-probe/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/protonnegativo/raijin-probe)](https://github.com/protonnegativo/raijin-probe/releases/latest)
+[![License: MIT](https://img.shields.io/github/license/protonnegativo/raijin-probe)](LICENSE)
+[![Go Reference](https://pkg.go.dev/badge/github.com/protonnegativo/raijin-probe.svg)](https://pkg.go.dev/github.com/protonnegativo/raijin-probe)
+[![Go Report Card](https://goreportcard.com/badge/github.com/protonnegativo/raijin-probe)](https://goreportcard.com/report/github.com/protonnegativo/raijin-probe)
+
 **httpx for AI agents: every URL with its status, title, tech and size, identical responses collapsed, the interesting hosts ranked first.**
 
 `raijin-probe` is a tool of **Raijin**, an arsenal of offensive security tools built for AI agents. It runs [httpx](https://github.com/projectdiscovery/httpx) underneath and returns the **Raijin Schema**: one compact JSON where URLs that returned the same response share one entry, login panels, directory listings, 401/403s, 5xx errors and outliers are ranked findings, and anything it had to cut is counted.
@@ -74,6 +80,7 @@ Targets outside the scope are dropped before httpx runs, and results for out-of-
 
 ```json
 {
+  "schema_version": 1,
   "tool": "raijin-probe",
   "version": "0.1.0",
   "target": "56 target(s)",
