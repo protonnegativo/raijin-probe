@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Tags HEAD with the next release and creates its GitHub Release. Usage: release.sh [patch|minor|major] [before-sha]
 # With before-sha (the commit before a push), it skips pushes that only touch files the binary does not
-# build from. engines.json is embedded in the binary, so a change to it releases. Needs GH_TOKEN.
+# build from. engines.json is embedded in the binary, so a change to it releases. Needs GH_TOKEN (contents: write, actions: write).
 set -euo pipefail
 
 bump=${1:-patch}
@@ -40,4 +40,6 @@ git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 git tag -a "$next" -m "$next"
 git push origin "$next"
 gh release create "$next" --verify-tag --generate-notes --title "$next"
+# Events created with the GITHUB_TOKEN do not start other workflows, so start the binaries build here.
+gh workflow run goreleaser.yml -f tag="$next"
 echo "released $next"
